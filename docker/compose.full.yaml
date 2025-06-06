@@ -213,3 +213,27 @@ services:
       - ./env/r2r-dashboard.env
     ports:
       - "7273:3000"
+
+  litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    container_name: litellm
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./litellm/litellm_proxy_config.yaml:/app/config.yaml
+    env_file:
+      - ./litellm/.env
+    command: --config /app/config.yaml --detailed_debug
+
+  ollama:
+    image: nginx:alpine
+    ports:
+      - "11434:80"
+    volumes:
+      - ./user_configs/ollama.conf:/etc/nginx/conf.d/default.conf:ro
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
