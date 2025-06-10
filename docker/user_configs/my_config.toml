@@ -6,7 +6,7 @@ fast_llm = "ollama/qwen3:30b-a3b-fp16" ### NOTE - RECOMMENDED TO USE `openai` wi
 quality_llm = "ollama/qwen3:30b-a3b-fp16"
 
 # LLM used for ingesting visual inputs
-vlm = "ollama/qwen2.5vl:32b-fp16" # TODO - Replace with viable candidate
+vlm = "ollama/qwen2.5vl:32b" # TODO - Replace with viable candidate
 
 
 # Reasoning model, used for `research` agent
@@ -45,15 +45,15 @@ planning_llm = "ollama/qwen3:30b-a3b-fp16"
 
 [embedding]
 provider = "ollama"
-base_model = "jeffh/intfloat-multilingual-e5-large-instruct:f32"
-base_dimension = 1_024
+base_model = "nomic-embed-text"
+base_dimension = 768
 batch_size = 128
 concurrent_request_limit = 5
 
 [completion_embedding]
 provider = "ollama"
-base_model = "jeffh/intfloat-multilingual-e5-large-instruct:f32"
-base_dimension = 1_024
+base_model = "nomic-embed-text"
+base_dimension = 768
 batch_size = 128
 concurrent_request_limit = 5
 
@@ -62,7 +62,7 @@ tools = ["search_file_knowledge"]
 
 [completion]
 provider = "litellm"
-concurrent_request_limit = 1
+concurrent_request_limit = 5
 
   [completion.generation_config]
   temperature = 0.1
@@ -74,13 +74,12 @@ concurrent_request_limit = 1
 [ingestion]
 provider = "unstructured_local"
 strategy = "auto"
-chunking_strategy = "by_title"
 new_after_n_chars = 512
 max_characters = 1_024
 combine_under_n_chars = 128
 overlap = 20
 chunks_for_document_summary = 16
-document_summary_model = "ollama/qwen3:30b-a3b-fp16"
+document_summary_model = "ollama/qwen2.5vl:32b"
 automatic_extraction = false
 
 [orchestration]
