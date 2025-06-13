@@ -8,6 +8,7 @@ from ..api.v3.collections_router import CollectionsRouter
 from ..api.v3.conversations_router import ConversationsRouter
 from ..api.v3.documents_router import DocumentsRouter
 from ..api.v3.graph_router import GraphRouter
+from ..api.v3.images_router import ImagesRouter
 from ..api.v3.indices_router import IndicesRouter
 from ..api.v3.prompts_router import PromptsRouter
 from ..api.v3.retrieval_router import RetrievalRouter
@@ -17,6 +18,7 @@ from ..app import R2RApp
 from ..config import R2RConfig
 from ..services.auth_service import AuthService  # noqa: F401
 from ..services.graph_service import GraphService  # noqa: F401
+from ..services.image_service import ImageService  # noqa: F401
 from ..services.ingestion_service import IngestionService  # noqa: F401
 from ..services.maintenance_service import MaintenanceService  # noqa: F401
 from ..services.management_service import ManagementService  # noqa: F401
@@ -37,6 +39,7 @@ class R2RBuilder:
         "management",
         "retrieval",
         "graph",
+        "image",
     ]
 
     def __init__(self, config: R2RConfig):
@@ -100,6 +103,11 @@ class R2RBuilder:
                 config=self.config,
             ).get_router(),
             "graph_router": GraphRouter(
+                providers=providers,
+                services=services,
+                config=self.config,
+            ).get_router(),
+            "images_router": ImagesRouter(
                 providers=providers,
                 services=services,
                 config=self.config,

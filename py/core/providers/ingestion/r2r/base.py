@@ -266,7 +266,7 @@ class R2RIngestionProvider(IngestionProvider):
                     # Collect content from VLMPDFParser
                     async for chunk in self.parsers[
                         f"zerox_{DocumentType.PDF.value}"
-                    ].ingest(file_content, **ingestion_config_override):
+                    ].ingest(file_content, document_id=document.id, **ingestion_config_override):
                         if isinstance(chunk, dict) and chunk.get("content"):
                             contents.append(chunk)
                         elif (
@@ -276,7 +276,7 @@ class R2RIngestionProvider(IngestionProvider):
                 elif parser_overrides[DocumentType.PDF.value] == "ocr":
                     async for chunk in self.parsers[
                         f"ocr_{DocumentType.PDF.value}"
-                    ].ingest(file_content, **ingestion_config_override):
+                    ].ingest(file_content, document_id=document.id, **ingestion_config_override):
                         if isinstance(chunk, dict) and chunk.get("content"):
                             contents.append(chunk)
 
@@ -387,7 +387,7 @@ class R2RIngestionProvider(IngestionProvider):
             else:
                 # Standard parsing for non-override cases
                 async for text in self.parsers[document.document_type].ingest(
-                    file_content, **ingestion_config_override
+                    file_content, document_id=document.id, **ingestion_config_override
                 ):
                     if text is not None:
                         contents.append({"content": text})

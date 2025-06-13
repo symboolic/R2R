@@ -21,6 +21,7 @@ from .api.v3.prompts_router import PromptsRouter
 from .api.v3.retrieval_router import RetrievalRouter
 from .api.v3.system_router import SystemRouter
 from .api.v3.users_router import UsersRouter
+from .api.v3.images_router import ImagesRouter
 from .config import R2RConfig
 from .middleware.project_schema import ProjectSchemaMiddleware
 
@@ -39,6 +40,7 @@ class R2RApp:
         conversations_router: ConversationsRouter,
         documents_router: DocumentsRouter,
         graph_router: GraphRouter,
+        images_router: ImagesRouter,
         indices_router: IndicesRouter,
         prompts_router: PromptsRouter,
         retrieval_router: RetrievalRouter,
@@ -55,6 +57,7 @@ class R2RApp:
         self.conversations_router = conversations_router
         self.documents_router = documents_router
         self.graph_router = graph_router
+        self.images_router = images_router
         self.indices_router = indices_router
         self.orchestration_provider = orchestration_provider
         self.prompts_router = prompts_router
@@ -83,6 +86,7 @@ class R2RApp:
         self.app.include_router(self.conversations_router, prefix="/v3")
         self.app.include_router(self.documents_router, prefix="/v3")
         self.app.include_router(self.graph_router, prefix="/v3")
+        self.app.include_router(self.images_router, prefix="/v3")
         self.app.include_router(self.indices_router, prefix="/v3")
         self.app.include_router(self.prompts_router, prefix="/v3")
         self.app.include_router(self.retrieval_router, prefix="/v3")

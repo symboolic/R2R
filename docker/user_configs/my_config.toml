@@ -6,7 +6,7 @@ fast_llm = "ollama/qwen3:30b-a3b-fp16" ### NOTE - RECOMMENDED TO USE `openai` wi
 quality_llm = "ollama/qwen3:30b-a3b-fp16"
 
 # LLM used for ingesting visual inputs
-vlm = "ollama/qwen2.5vl:32b" # TODO - Replace with viable candidate
+vlm = "ollama/qwen2.5vl:32b-fp16" # TODO - Replace with viable candidate
 
 
 # Reasoning model, used for `research` agent
@@ -79,7 +79,7 @@ max_characters = 1_024
 combine_under_n_chars = 128
 overlap = 20
 chunks_for_document_summary = 16
-document_summary_model = "ollama/qwen2.5vl:32b"
+document_summary_model = "ollama/qwen2.5vl:32b-fp16"
 automatic_extraction = false
 
 [orchestration]

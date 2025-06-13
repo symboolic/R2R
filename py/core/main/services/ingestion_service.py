@@ -43,6 +43,17 @@ class IngestionService:
     """A refactored IngestionService that inlines all pipe logic for parsing,
     embedding, and vector storage directly in its methods."""
 
+    IMAGE_TYPES = {
+        DocumentType.GIF,
+        DocumentType.JPEG,
+        DocumentType.JPG,
+        DocumentType.PNG,
+        DocumentType.HEIC,
+        DocumentType.SVG,
+        DocumentType.TIFF,
+        DocumentType.BMP,
+    }
+
     def __init__(
         self,
         config: R2RConfig,
@@ -242,6 +253,14 @@ class IngestionService:
             with file_wrapper as file_content_stream:
                 file_content = file_content_stream.read()
 
+            # Check if this is an image document and store it
+            image_uuid = None
+            if document_info.document_type in self.IMAGE_TYPES:
+                mime_type = self._get_image_mime_type(document_info.document_type)
+                image_uuid = await self._store_image_and_get_uuid(
+                    file_content, document_info, mime_type
+                )
+
             # Build a barebones Document object
             doc = Document(
                 id=document_info.id,
@@ -264,6 +283,11 @@ class IngestionService:
                 # or any other needed transformations
                 extraction.id = generate_id(f"{extraction.id}_{version}")
                 extraction.metadata["version"] = version
+                
+                # Add image UUID to chunk metadata if this is an image document
+                if image_uuid:  
+                    extraction.metadata["image_uuid"] = str(image_uuid)                
+                
                 yield extraction
 
         except (PopplerNotFoundError, PDFParsingError) as e:
@@ -847,6 +871,55 @@ class IngestionService:
         **kwargs: Any,
     ) -> dict:
         return await self.providers.database.chunks_handler.get_chunk(chunk_id)
+
+    async def _store_image_and_get_uuid(
+        self,
+        file_content: bytes,
+        document_info: DocumentResponse,
+        mime_type: str,
+    ) -> UUID:
+        """Store image in database and return its UUID"""
+        try:
+            # Create metadata for the image
+            metadata = {
+                "document_id": str(document_info.id),
+                "document_title": document_info.title,
+                "original_filename": document_info.metadata.get("filename", ""),
+                "document_metadata": document_info.metadata,
+            }
+
+            # Store the image using ImageService
+            image_uuid = await self.providers.database.images_handler.store_image(
+                image_data=file_content,
+                mime_type=mime_type,
+                width=None,  # Will be extracted by ImageService
+                height=None,  # Will be extracted by ImageService
+                metadata=metadata,
+            )
+
+            logger.info(f"Stored image with UUID: {image_uuid} for document: {document_info.id}")
+            return image_uuid
+
+        except Exception as e:
+            logger.error(f"Error storing image for document {document_info.id}: {e}")
+            raise R2RException(
+                status_code=500,
+                message=f"Failed to store image: {str(e)}"
+            )
+
+    async def _get_image_mime_type(self, document_type: DocumentType) -> str:
+        """Get MIME type from document type"""
+        mime_mapping = {
+            DocumentType.GIF: "image/gif",
+            DocumentType.JPEG: "image/jpeg",
+            DocumentType.JPG: "image/jpeg",
+            DocumentType.PNG: "image/png",
+            DocumentType.HEIC: "image/heic",
+            DocumentType.SVG: "image/svg+xml",
+            DocumentType.TIFF: "image/tiff",
+            DocumentType.BMP: "image/bmp",
+        }
+        return mime_mapping.get(document_type, "application/octet-stream")
 
 
 class IngestionServiceAdapter:

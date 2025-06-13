@@ -33,6 +33,7 @@ from core.providers import (
 if TYPE_CHECKING:
     from core.main.services.auth_service import AuthService
     from core.main.services.graph_service import GraphService
+    from core.main.services.image_service import ImageService
     from core.main.services.ingestion_service import IngestionService
     from core.main.services.maintenance_service import MaintenanceService
     from core.main.services.management_service import ManagementService
@@ -89,3 +90,4 @@ class R2RServices:
     management: "ManagementService"
     retrieval: "RetrievalService"
     graph: "GraphService"
+    image: "ImageService"

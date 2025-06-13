@@ -218,10 +218,11 @@ class UnstructuredIngestionProvider(IngestionProvider):
         file_content: bytes,
         ingestion_config: dict,
         parser_name: str,
+        document_id: str | None = None,
     ) -> AsyncGenerator[FallbackElement, None]:
         contents = []
         async for chunk in self.parsers[parser_name].ingest(  # type: ignore
-            file_content, **ingestion_config
+            file_content, document_id=document_id, **ingestion_config
         ):  # type: ignore
             if isinstance(chunk, dict) and chunk.get("content"):
                 contents.append(chunk)
@@ -314,6 +315,7 @@ class UnstructuredIngestionProvider(IngestionProvider):
                     file_content,
                     ingestion_config=ingestion_config,
                     parser_name=f"zerox_{DocumentType.PDF.value}",
+                    document_id=document.id,
                 ):
                     logger.warning(
                         f"Using parser_override for {document.document_type}"
@@ -324,6 +326,7 @@ class UnstructuredIngestionProvider(IngestionProvider):
                     file_content,
                     ingestion_config=ingestion_config,
                     parser_name=f"ocr_{DocumentType.PDF.value}",
+                    document_id=document.id,
                 ):
                     logger.warning(
                         f"Using OCR parser_override for {document.document_type}"
@@ -338,6 +341,7 @@ class UnstructuredIngestionProvider(IngestionProvider):
                 file_content,
                 ingestion_config=ingestion_config,
                 parser_name=document.document_type,
+                document_id=document.id,
             ):
                 elements.append(element)
         else:

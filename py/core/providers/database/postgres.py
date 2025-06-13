@@ -20,6 +20,7 @@ from .graphs import (
     PostgresGraphsHandler,
     PostgresRelationshipsHandler,
 )
+from .images import PostgresImagesHandler
 from .limits import PostgresLimitsHandler
 from .maintenance import PostgresMaintenanceHandler
 from .prompts_handler import PostgresPromptsHandler
@@ -68,6 +69,7 @@ class PostgresDatabaseProvider(DatabaseProvider):
     conversations_handler: PostgresConversationsHandler
     limits_handler: PostgresLimitsHandler
     maintenance_handler: PostgresMaintenanceHandler
+    images_handler: PostgresImagesHandler
 
     def __init__(
         self,
@@ -197,6 +199,10 @@ class PostgresDatabaseProvider(DatabaseProvider):
             connection_manager=self.connection_manager,
             config=self.config,
         )
+        self.images_handler = PostgresImagesHandler(
+            project_name=self.project_name,
+            connection_manager=self.connection_manager,
+        )
 
     async def initialize(self):
         logger.info("Initializing `PostgresDatabaseProvider`.")
@@ -235,6 +241,7 @@ class PostgresDatabaseProvider(DatabaseProvider):
         await self.conversations_handler.create_tables()
         await self.limits_handler.create_tables()
         await self.maintenance_handler.create_tables()
+        await self.images_handler.create_tables()
 
     async def schema_exists(self, schema_name: str) -> bool:
         """Check if a PostgreSQL schema exists."""

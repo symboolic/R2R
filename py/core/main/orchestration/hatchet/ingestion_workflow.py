@@ -28,8 +28,13 @@ from ...services import IngestionService, IngestionServiceAdapter
 if TYPE_CHECKING:
     from hatchet_sdk import Hatchet
 
-logger = logging.getLogger()
+# Add this to your R2R config or environment
+import logging
+logging.basicConfig(level=logging.DEBUG)
 
+# Or add specific loggers
+logger = logging.getLogger("R2R.image_ingestion")
+logger.setLevel(logging.DEBUG)
 
 def hatchet_ingestion_factory(
     orchestration_provider: OrchestrationProvider, service: IngestionService

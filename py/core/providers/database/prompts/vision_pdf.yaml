@@ -20,13 +20,15 @@ vision_pdf:
     - Include any surrounding context or references
 
     Images:
-    - Enclose image descriptions within [FIG] and [/FIG] tags
+    - Enclose image descriptions within [FIG-N] and [/FIG-N] tags where N is the figure number shown in the image overlay
+    - For each image with a visible figure number (FIG-1, FIG-2, etc.), use that exact number in your tags
     - Include detailed descriptions of:
       * Main subject matter
       * Text overlays or captions
       * Charts, graphs, or diagrams
       * Relevant colors, patterns, or visual elements
     - Maintain image placement relative to surrounding text
+    - Example: [FIG-1]Description of the first figure[/FIG-1]
 
     Additional Elements:
     - Include page numbers if visible

@@ -197,6 +197,14 @@ class ManagementService(Service):
 
         # Delete documents that no longer have associated chunks
         for doc_id in docs_to_delete:
+            # Clean up images associated with this document
+            if hasattr(self.providers.database, 'images_handler'):
+                try:
+                    cleanup_result = await self.providers.database.images_handler.cleanup_images_for_document(doc_id)
+                    logger.info(f"Image cleanup for document {doc_id}: {cleanup_result}")
+                except Exception as e:
+                    logger.warning(f"Failed to cleanup images for document {doc_id}: {str(e)}")
+            
             # Delete related entities & relationships if needed:
             await self.providers.database.graphs_handler.entities.delete(
                 parent_id=doc_id,

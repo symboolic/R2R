@@ -3,6 +3,10 @@ model_list:
     litellm_params:
       model: ollama/qwen3:30b-a3b-fp16
       api_key: ollama
+  - model_name: ollama/qwen2.5vl:32b-fp16
+    litellm_params:
+      model: ollama/qwen2.5vl:32b-fp16
+      api_key: ollama
   - model_name: ollama/qwen2.5vl:32b
     litellm_params:
       model: ollama/qwen2.5vl:32b
