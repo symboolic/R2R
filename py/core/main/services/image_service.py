@@ -77,8 +77,6 @@ class ImageService(Service):
                 metadata=img_metadata,
                 document_id=document_id,
             )
-
-            logger.info(f"Successfully stored image with UUID: {image_uuid}")
             return image_uuid
 
         except Exception as e:

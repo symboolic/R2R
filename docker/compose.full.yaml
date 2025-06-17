@@ -183,7 +183,7 @@ services:
     image: sciphiai/r2r:latest
     ports:
       - "7272:7272"
-      - "5678:5678"
+      # - "5678:5678" # for debugging
     env_file:
       - ./env/r2r-full.env
     command: sh /scripts/start-r2r.sh

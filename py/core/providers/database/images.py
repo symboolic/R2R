@@ -36,6 +36,7 @@ class PostgresImagesHandler(Handler):
                 width INTEGER,
                 height INTEGER,
                 file_size INTEGER,
+                page_number INTEGER,
                 document_ids UUID[] DEFAULT ARRAY[]::UUID[],
                 metadata JSONB DEFAULT '{{}}',
                 created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -53,6 +54,10 @@ class PostgresImagesHandler(Handler):
             -- Index for document_ids array queries
             CREATE INDEX IF NOT EXISTS idx_images_document_ids_{self.project_name}
             ON {self._get_table_name(PostgresImagesHandler.TABLE_NAME)} USING GIN (document_ids);
+            
+            -- Index for page_number queries
+            CREATE INDEX IF NOT EXISTS idx_images_page_number_{self.project_name}
+            ON {self._get_table_name(PostgresImagesHandler.TABLE_NAME)} (page_number);
             """
             await self.connection_manager.execute_query(query)
 
@@ -73,6 +78,7 @@ class PostgresImagesHandler(Handler):
         mime_type: str,
         width: Optional[int] = None,
         height: Optional[int] = None,
+        page_number: Optional[int] = None,
         metadata: Optional[dict[str, Any]] = None,
         document_id: Optional[UUID] = None,
     ) -> UUID:
@@ -94,24 +100,25 @@ class PostgresImagesHandler(Handler):
         
         query = f"""
         INSERT INTO {self._get_table_name(PostgresImagesHandler.TABLE_NAME)} 
-        (id, content_hash, image_data, mime_type, width, height, file_size, document_ids, metadata)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-        ON CONFLICT (content_hash) DO UPDATE SET
+        (id, content_hash, image_data, mime_type, width, height, file_size, page_number, document_ids, metadata)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        ON CONFLICT (id) DO UPDATE SET
             document_ids = CASE 
-                WHEN $8::UUID[] IS NOT NULL AND array_length($8::UUID[], 1) > 0 THEN
-                    array(SELECT DISTINCT unnest(EXCLUDED.document_ids || $8::UUID[]))
+                WHEN $9::UUID[] IS NOT NULL AND array_length($9::UUID[], 1) > 0 THEN
+                    array(SELECT DISTINCT unnest(EXCLUDED.document_ids || $9::UUID[]))
                 ELSE EXCLUDED.document_ids
             END,
+            page_number = EXCLUDED.page_number,
             updated_at = NOW()
         RETURNING id
         """
         
         try:
             result = await self.connection_manager.fetchrow_query(
-                query, [image_uuid, content_hash, image_data, mime_type, width, height, file_size, document_ids, json.dumps(metadata)]
+                query, [image_uuid, content_hash, image_data, mime_type, width, height, file_size, page_number, document_ids, json.dumps(metadata)]
             )
             if result:
-                logger.info(f"Stored new image with UUID: {image_uuid}")
+                logger.debug(f"Stored new image with UUID: {image_uuid}")
                 return image_uuid
             else:
                 # Image already exists, return existing UUID
@@ -128,7 +135,7 @@ class PostgresImagesHandler(Handler):
         """Add a document ID to an image's document_ids array if not already present"""
         query = f"""
         UPDATE {self._get_table_name(PostgresImagesHandler.TABLE_NAME)}
-        SET document_ids = array(SELECT DISTINCT unnest(document_ids || $2::UUID[])),
+        SET document_ids = array(SELECT DISTINCT unnest(document_ids || ARRAY[$2]::UUID[])),
             updated_at = NOW()
         WHERE id = $1 AND NOT ($2 = ANY(document_ids))
         RETURNING id
@@ -187,12 +194,12 @@ class PostgresImagesHandler(Handler):
                     # This image is only used by this document, delete it
                     await self.delete_image(image_id)
                     deleted_count += 1
-                    logger.info(f"Deleted image {image_id} (only used by document {document_id})")
+                    logger.debug(f"Deleted image {image_id} (only used by document {document_id})")
                 else:
                     # This image is used by other documents, just remove this document reference
                     await self.remove_document_from_image(image_id, document_id)
                     updated_count += 1
-                    logger.info(f"Removed document {document_id} from image {image_id}")
+                    logger.debug(f"Removed document {document_id} from image {image_id}")
             
             return {
                 "deleted_images": deleted_count,
@@ -206,7 +213,7 @@ class PostgresImagesHandler(Handler):
     async def get_image_by_hash(self, content_hash: str) -> Optional[dict[str, Any]]:
         """Retrieve an image by its content hash"""
         query = f"""
-        SELECT id, content_hash, image_data, mime_type, width, height, file_size, document_ids, metadata, created_at, updated_at
+        SELECT id, content_hash, image_data, mime_type, width, height, file_size, page_number, document_ids, metadata, created_at, updated_at
         FROM {self._get_table_name(PostgresImagesHandler.TABLE_NAME)}
         WHERE content_hash = $1
         """
@@ -221,7 +228,7 @@ class PostgresImagesHandler(Handler):
     async def get_image_by_uuid(self, image_uuid: UUID) -> Optional[dict[str, Any]]:
         """Retrieve an image by its UUID"""
         query = f"""
-        SELECT id, content_hash, image_data, mime_type, width, height, file_size, document_ids, metadata, created_at, updated_at
+        SELECT id, content_hash, image_data, mime_type, width, height, file_size, page_number, document_ids, metadata, created_at, updated_at
         FROM {self._get_table_name(PostgresImagesHandler.TABLE_NAME)}
         WHERE id = $1
         """
@@ -236,7 +243,7 @@ class PostgresImagesHandler(Handler):
     async def get_image_metadata_by_uuid(self, image_uuid: UUID) -> Optional[dict[str, Any]]:
         """Retrieve image metadata (without binary data) by UUID"""
         query = f"""
-        SELECT id, content_hash, mime_type, width, height, file_size, document_ids, metadata, created_at, updated_at
+        SELECT id, content_hash, mime_type, width, height, file_size, page_number, document_ids, metadata, created_at, updated_at
         FROM {self._get_table_name(PostgresImagesHandler.TABLE_NAME)}
         WHERE id = $1
         """
@@ -269,9 +276,10 @@ class PostgresImagesHandler(Handler):
     async def get_images_by_document_id(self, document_id: UUID) -> list[dict[str, Any]]:
         """Retrieve all images associated with a document"""
         query = f"""
-        SELECT id, content_hash, mime_type, width, height, file_size, document_ids, metadata, created_at, updated_at
+        SELECT id, content_hash, mime_type, width, height, file_size, page_number, document_ids, metadata, created_at, updated_at
         FROM {self._get_table_name(PostgresImagesHandler.TABLE_NAME)}
         WHERE $1 = ANY(document_ids)
+        ORDER BY page_number NULLS LAST, created_at
         """
         
         try:
@@ -279,6 +287,25 @@ class PostgresImagesHandler(Handler):
             return [dict(row) for row in results]
         except Exception as e:
             logger.error(f"Error retrieving images for document {document_id}: {e}")
+            return []
+
+    async def get_images_by_document_and_page(self, document_id: UUID, page_number: int) -> list[dict[str, Any]]:
+        """Retrieve all images associated with a document on a specific page"""
+        query = f"""
+        SELECT id, content_hash, mime_type, width, height, file_size, page_number, document_ids, metadata, created_at, updated_at
+        FROM {self._get_table_name(PostgresImagesHandler.TABLE_NAME)}
+        WHERE $1 = ANY(document_ids) AND page_number = $2
+        ORDER BY created_at
+        """
+        
+        try:
+            results = await self.connection_manager.fetch_query(query, [document_id, page_number])
+            return [{
+                **dict(row),
+                'metadata': json.loads(row['metadata']) if row['metadata'] else {}
+            } for row in results]
+        except Exception as e:
+            logger.error(f"Error retrieving images for document {document_id}, page {page_number}: {e}")
             return []
 
     async def delete_image(self, image_uuid: UUID) -> bool:
@@ -341,7 +368,7 @@ class PostgresImagesHandler(Handler):
         
         # Data query
         data_query = f"""
-        SELECT id, content_hash, mime_type, width, height, file_size, document_ids, metadata, created_at, updated_at
+        SELECT id, content_hash, mime_type, width, height, file_size, page_number, document_ids, metadata, created_at, updated_at
         FROM {self._get_table_name(PostgresImagesHandler.TABLE_NAME)}
         {where_clause}
         ORDER BY created_at DESC

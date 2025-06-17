@@ -1,6 +1,7 @@
 # type: ignore
 import asyncio
 import base64
+import gc
 import json
 import logging
 import string
@@ -15,6 +16,7 @@ import pdf2image
 from mistralai.models import OCRResponse
 from pypdf import PdfReader
 import pdfplumber
+from pdfplumber.page import Page
 from PIL import Image, ImageDraw, ImageFont
 
 from core.base.abstractions import GenerationConfig
@@ -88,16 +90,16 @@ class VLMPDFParser(AsyncParser[str | bytes]):
         self.llm_provider = llm_provider
         self.config = config
         self.vision_prompt_text = None
-        self.vlm_batch_size = self.config.vlm_batch_size or 5
+        self.vlm_batch_size = self.config.vlm_batch_size or 3
         self.vlm_max_tokens_to_sample = (
             self.config.vlm_max_tokens_to_sample or 1024
         )
         self.max_concurrent_vlm_tasks = (
-            self.config.max_concurrent_vlm_tasks or 5
+            self.config.max_concurrent_vlm_tasks or 3
         )
         self.semaphore = None
 
-    async def process_page(self, image, page_num: int) -> dict[str, str]:
+    async def process_page(self, image, page_num: int, stream: bool = False) -> dict[str, str]:
         """Process a single PDF page using the vision model."""
         page_start = time.perf_counter()
         try:
@@ -112,7 +114,7 @@ class VLMPDFParser(AsyncParser[str | bytes]):
             # Configure generation parameters
             generation_config = GenerationConfig(
                 model=self.config.vlm or self.config.app.vlm,
-                stream=False,
+                stream=stream,
                 max_tokens_to_sample=self.vlm_max_tokens_to_sample,
             )
 
@@ -156,41 +158,80 @@ class VLMPDFParser(AsyncParser[str | bytes]):
             logger.debug(f"Sending page {page_num} to vision model.")
 
             if is_anthropic:
-                response = await self.llm_provider.aget_completion(
-                    messages=messages,
-                    generation_config=generation_config,
-                    apply_timeout=False,
-                    tools=[
-                        {
-                            "name": "parse_pdf_page",
-                            "description": "Parse text content from a PDF page",
-                            "input_schema": {
-                                "type": "object",
-                                "properties": {
-                                    "page_content": {
-                                        "type": "string",
-                                        "description": "Extracted text from the PDF page, transcribed into markdown",
-                                    },
-                                    "thoughts": {
-                                        "type": "string",
-                                        "description": "Any thoughts or comments on the text",
-                                    },
-                                },
-                                "required": ["page_content"],
-                            },
-                        }
-                    ],
-                    tool_choice={"type": "tool", "name": "parse_pdf_page"},
-                )
 
-                if (
-                    response.choices
-                    and response.choices[0].message
-                    and response.choices[0].message.tool_calls
-                ):
-                    tool_call = response.choices[0].message.tool_calls[0]
-                    args = json.loads(tool_call.function.arguments)
-                    content = args.get("page_content", "")
+                if stream:
+                    response_stream = self.llm_provider.aget_completion_stream(
+                        messages=messages,
+                        generation_config=generation_config,
+                        tools=[
+                            {
+                                "name": "parse_pdf_page",
+                                "description": "Parse text content from a PDF page",
+                                "input_schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "page_content": {
+                                            "type": "string",
+                                            "description": "Extracted text from the PDF page, transcribed into markdown",
+                                        },
+                                        "thoughts": {
+                                            "type": "string",
+                                            "description": "Any thoughts or comments on the text",
+                                        },
+                                    },
+                                    "required": ["page_content"],
+                                },
+                            }
+                        ],
+                        tool_choice={"type": "tool", "name": "parse_pdf_page"},
+                    )
+
+                    content = ""
+
+                    async for chunk in response_stream:
+                        if not chunk.choices or not chunk.choices[0].delta.content:
+                            continue
+                        content += chunk.choices[0].delta.content
+
+                else:   
+                    
+                    response = await self.llm_provider.aget_completion(
+                        messages=messages,
+                        generation_config=generation_config,
+                        apply_timeout=False,
+                        tools=[
+                            {
+                                "name": "parse_pdf_page",
+                                "description": "Parse text content from a PDF page",
+                                "input_schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "page_content": {
+                                            "type": "string",
+                                            "description": "Extracted text from the PDF page, transcribed into markdown",
+                                        },
+                                        "thoughts": {
+                                            "type": "string",
+                                            "description": "Any thoughts or comments on the text",
+                                        },
+                                    },
+                                    "required": ["page_content"],
+                                },
+                            }
+                        ],
+                        tool_choice={"type": "tool", "name": "parse_pdf_page"},
+                    )
+
+                    if (
+                        response.choices
+                        and response.choices[0].message
+                        and response.choices[0].message.tool_calls
+                    ):
+                        tool_call = response.choices[0].message.tool_calls[0]
+                        args = json.loads(tool_call.function.arguments)
+                        content = args.get("page_content", "")
+
+                if content:
                     page_elapsed = time.perf_counter() - page_start
                     logger.debug(
                         f"Processed page {page_num} in {page_elapsed:.2f} seconds."
@@ -202,18 +243,43 @@ class VLMPDFParser(AsyncParser[str | bytes]):
                     )
                     return {"page": str(page_num), "content": ""}
             else:
-                response = await self.llm_provider.aget_completion(
-                    messages=messages,
-                    generation_config=generation_config,
-                    apply_timeout=False,
-                )
 
-                if response.choices and response.choices[0].message:
-                    content = response.choices[0].message.content
+                if stream:
+                    response_stream = self.llm_provider.aget_completion_stream(
+                        messages=messages,
+                        generation_config=generation_config
+                    )
+
+                    # Handle streaming response
+                    content = ""
+
+                
+                    # Stream handling - iterate through chunks
+                    async for chunk in response_stream:
+                        if not chunk.choices or not chunk.choices[0].delta.content:
+                            continue
+                        content += chunk.choices[0].delta.content
+
+                else:
+                    
+                    response = await self.llm_provider.aget_completion(
+                        messages=messages,
+                        generation_config=generation_config,
+                        apply_timeout=False,
+                    )
+
+                    if response.choices and response.choices[0].message:
+                        content = response.choices[0].message.content
+
+                if content:
                     page_elapsed = time.perf_counter() - page_start
                     logger.debug(
                         f"Processed page {page_num} in {page_elapsed:.2f} seconds."
                     )
+
+                    if page_num % 10 == 0 and page_num > 0:
+                        logger.info(f"Processed page {page_num}")
+
                     return {"page": str(page_num), "content": content}
                 else:
                     msg = f"No response content for page {page_num}"
@@ -221,40 +287,49 @@ class VLMPDFParser(AsyncParser[str | bytes]):
                     return {"page": str(page_num), "content": ""}
         except Exception as e:
             logger.error(
-                f"Error processing page {page_num} with vision model: {str(e)}"
+                f"Error processing page {page_num} with vision model: {str(e).split('\n')[0]}"
             )
             # Return empty content rather than raising to avoid failing the entire batch
             return {
                 "page": str(page_num),
-                "content": f"Error processing page: {str(e)}",
+                "content": "Error processing page",
             }
 
-    def replace_figure_numbers_with_uuids(self, content: str, page_num: int) -> str:
-        """Replace [FIG-N] tags with [FIG-uuid] tags."""
-        if not hasattr(self, 'image_uuid_mapping') or page_num not in self.image_uuid_mapping:
-            return content
-        
+    async def replace_figure_numbers_with_uuids(self, content: str, page_num: int, document_id: str) -> str:
+        """Replace [FIG-N] tags with [FIG-uuid] tags by querying database."""
         import re
         
-        # Create a mapping from figure numbers to UUIDs for this page
-        fig_to_uuid = {}
-        for img_info in self.image_uuid_mapping[page_num]:
-            fig_to_uuid[img_info['fig_num']] = img_info['uuid']
-        
-        # Replace [FIG-N] and [/FIG-N] tags with UUID versions
-        def replace_fig_tag(match):
-            fig_num = int(match.group(1))
-            if fig_num in fig_to_uuid:
-                uuid = fig_to_uuid[fig_num]
-                if match.group(0).startswith('[/'):
-                    return f'[/FIG: {uuid}]'
-                else:
-                    return f'[FIG: {uuid}]'
-            return match.group(0)  # Return original if no UUID found
-        
-        # Replace opening and closing tags
-        content = re.sub(r'\[FIG-(\d+)\]', replace_fig_tag, content)
-        content = re.sub(r'\[/FIG-(\d+)\]', replace_fig_tag, content)
+        # Get images for this page from database instead of RAM
+        try:
+            images_on_page = await self.database_provider.images_handler.get_images_by_document_and_page(
+                document_id=document_id,
+                page_number=page_num
+            )
+            
+            # Create mapping from figure numbers to UUIDs
+            fig_to_uuid = {}
+            for img in images_on_page:
+                metadata = img.get('metadata', {}) if isinstance(img, dict) else {}
+                fig_num = int(metadata.get('fig_num', 0)) if metadata.get('fig_num') else 0
+                fig_to_uuid[fig_num] = str(img['id'] if isinstance(img, dict) else img.id)
+            
+            # Replace [FIG-N] and [/FIG-N] tags with UUID versions
+            def replace_fig_tag(match):
+                fig_num = int(match.group(1))
+                if fig_num in fig_to_uuid:
+                    uuid = fig_to_uuid[fig_num]
+                    if match.group(0).startswith('[/'):
+                        return f'[/FIG: {uuid}]'
+                    else:
+                        return f'[FIG: {uuid}]'
+                return match.group(0)  # Return original if no UUID found
+            
+            # Replace opening and closing tags
+            content = re.sub(r'\[FIG-(\d+)\]', replace_fig_tag, content)
+            content = re.sub(r'\[/FIG-(\d+)\]', replace_fig_tag, content)
+            
+        except Exception as e:
+            logger.warning(f"Could not replace figure numbers with UUIDs for page {page_num}: {e}")
         
         return content
 
@@ -292,26 +367,22 @@ class VLMPDFParser(AsyncParser[str | bytes]):
         
         return processed_image
 
-    async def process_and_yield(self, image, page_num: int):
+    async def process_and_yield(self, image, page_num: int, document_id: str):
         """Process a page and yield the result."""
         async with self.semaphore:
-            # Add figure numbers to the image if there are embedded images on this page
-            processed_image = image
-            if hasattr(self, 'image_uuid_mapping') and page_num in self.image_uuid_mapping:
-                # Add figure number overlays to the image
-                processed_image = self.add_all_figure_numbers_to_page(image, page_num)
+            
+            # Add figure numbers to the image using minimal mapping
+            processed_image = self.add_all_figure_numbers_to_page(image, page_num)
             
             result = await self.process_page(processed_image, page_num)
             content = result.get("content", "") or ""
             
-            # Replace figure numbers with UUIDs in the content
-            if hasattr(self, 'image_uuid_mapping') and page_num in self.image_uuid_mapping:
-                content = self.replace_figure_numbers_with_uuids(content, page_num)
+            # Replace figure numbers with UUIDs in the content using database lookup
+            content = await self.replace_figure_numbers_with_uuids(content, page_num, document_id)
             
             return {
                 "content": content,
                 "page_number": page_num,
-                
             }
 
     async def ingest(
@@ -336,51 +407,7 @@ class VLMPDFParser(AsyncParser[str | bytes]):
         
         # Extract embedded images from PDF and store them
         pdf_data = data if isinstance(data, bytes) else open(data, 'rb').read()
-        extracted_images = extract_embedded_images_from_pdf_data(pdf_data)
-        
-        # Store images in database and create mapping
-        image_uuid_mapping = {}  # Maps page_num -> list of {fig_num, uuid}
-        
-        for image_info in extracted_images:
-            try:
-                # Store image in database
-                if hasattr(self.database_provider, 'images_handler'):
-                    stored_uuid = await self.database_provider.images_handler.store_image(
-                        image_data=image_info["image_data"],
-                        mime_type=image_info["mime_type"],
-                        width=image_info["width"],
-                        height=image_info["height"],
-                        metadata={
-                            "page_number": str(image_info["page_number"]),
-                            "x0": str(image_info["x0"]),
-                            "y0": str(image_info["y0"]),
-                            "x1": str(image_info["x1"]),
-                            "y1": str(image_info["y1"]),
-                        },
-                        document_id=document_id,  # Pass document_id to establish relationship
-                    )
-                    
-                    page_num = image_info["page_number"]
-                    if page_num not in image_uuid_mapping:
-                        image_uuid_mapping[page_num] = []
-                    
-                    fig_num = len(image_uuid_mapping[page_num]) + 1
-                    image_uuid_mapping[page_num].append({
-                        'fig_num': fig_num,
-                        'uuid': str(stored_uuid),
-                        'x0': image_info["x0"],
-                        'y0': image_info["y0"],
-                        'x1': image_info["x1"],
-                        'y1': image_info["y1"],
-                    })
-                    
-                    logger.info(f"Stored image {stored_uuid} as FIG-{fig_num} from page {page_num} for document {document_id}")
-                    
-            except Exception as e:
-                logger.warning(f"Failed to store image from page {image_info['page_number']}: {str(e)}")
-        
-        # Store the mapping for later use in processing
-        self.image_uuid_mapping = image_uuid_mapping
+        await self.extract_embedded_images_from_pdf_data(pdf_data, document_id)
 
         try:
             if isinstance(data, str):
@@ -427,10 +454,14 @@ class VLMPDFParser(AsyncParser[str | bytes]):
                 for i, image in enumerate(images):
                     page_num = batch_start + i
                     task = asyncio.create_task(
-                        self.process_and_yield(image, page_num)
+                        self.process_and_yield(image, page_num, document_id)
                     )
                     task.page_num = page_num  # Store page number for sorting
                     pending_tasks.append(task)
+                
+                # Clean up images list to free memory
+                del images
+                gc.collect()
 
                 # Check if any tasks have completed and yield them in order
                 while pending_tasks:
@@ -486,6 +517,127 @@ class VLMPDFParser(AsyncParser[str | bytes]):
         except Exception as e:
             logger.error(f"Error processing PDF: {str(e)}")
             raise
+
+    async def get_images_from_page(self, page: Page, document_id: str, page_num: int) -> int:
+
+        page_image_counter = 0
+        
+        # Get page dimensions once to avoid repeated access
+        page_height = page.cropbox[3]
+        page_width = page.cropbox[2]
+
+        # Get images from the page
+        for img_idx, img_obj in enumerate(page.images):
+            img_page = None
+            img = None
+            image_data = None
+            
+            try:
+                # Get image dimensions
+                width = img_obj.get('width', 0)
+                height = img_obj.get('height', 0)
+
+                bbox = [min(img_obj.get('x0', 0), page_width), min(page_height-img_obj.get('y1', 0), page_height),  min(img_obj.get('x1', 0), page_width), min(page_height-img_obj.get('y0', 0), page_height)]
+                img_page = page.crop(bbox=bbox)
+                img = img_page.to_image(resolution=300)
+                
+                with BytesIO() as output:
+                    img.original.save(output, format='PNG', optimize=True)
+                    image_data = output.getvalue()
+                
+                # Clean up PIL image objects immediately
+                if hasattr(img, 'original'):
+                    img.original.close()
+                del img
+                del img_page
+
+                content_hash = hashlib.sha256(image_data).hexdigest()
+                image_uuid = str(uuid.uuid4())
+                
+                # Store image in database with sequential figure number
+                if hasattr(self.database_provider, 'images_handler'):
+                    page_image_counter += 1
+
+                    stored_uuid = await self.database_provider.images_handler.store_image(
+                        image_data=image_data,
+                        mime_type='image/png',
+                        width=width,
+                        height=height,
+                        page_number=page_num,
+                        metadata={
+                            "x0": str(img_obj.get('x0', 0)),
+                            "y0": str(img_obj.get('y0', 0)),
+                            "x1": str(img_obj.get('x1', 0)),
+                            "y1": str(img_obj.get('y1', 0)),
+                            "fig_num": str(page_image_counter),
+                        },
+                        document_id=document_id,
+                    )
+                    
+                    logger.debug(f"Extracted and stored image {image_uuid} from page {page_num} (image {img_idx + 1})")
+
+                # Immediately clean up all variables
+                del image_data, content_hash, image_uuid
+                
+                # Force garbage collection every few images to prevent buildup
+                if img_idx % 3 == 0:  # Every 3 images
+                    gc.collect()
+                
+            except Exception as e:
+                logger.warning(f"Failed to extract image {img_idx + 1} from page {page_num}: {str(e)}")
+            finally:
+                # Ensure cleanup even on error
+                for var in ['img', 'img_page', 'image_data']:
+                    if var in locals() and locals()[var] is not None:
+                        try:
+                            if var == 'img' and hasattr(locals()[var], 'original'):
+                                locals()[var].original.close()
+                            del locals()[var]
+                        except:
+                            pass
+        
+        # Force garbage collection after processing all images on the page
+        gc.collect()
+
+        return page_image_counter
+        
+
+    async def extract_embedded_images_from_pdf_data(self, pdf_data: bytes, document_id: str) -> dict:
+        """Extract embedded images from PDF data using pdfplumber."""
+
+        global_fig_counter = 0
+        
+        # Open PDF with pdfplumber using memory-efficient approach
+        pdf_bytes = BytesIO(pdf_data)
+        with pdfplumber.open(pdf_bytes) as pdf:
+            total_pages = len(pdf.pages)
+            
+            # Process pages one by one to avoid keeping all pages in memory
+            for page_num in range(1, total_pages + 1):
+                # Get single page to avoid loading all pages at once
+                page = pdf.pages[page_num - 1]  # 0-indexed
+                
+                try:
+                    page_image_counter = await self.get_images_from_page(page, document_id, page_num)
+                    global_fig_counter += page_image_counter
+                finally:
+                    # Explicitly clean up page object
+                    if hasattr(page, 'flush_cache'):
+                        page.flush_cache()
+                    del page
+                    
+                    # Force garbage collection every few pages to prevent memory buildup
+                    if page_num % 5 == 0:  # Every 5 pages
+                        gc.collect()
+
+                    if page_num % 50 == 0 and page_num > 0:
+                        logger.info(f"Processed page {page_num} of {total_pages} - Extracted {global_fig_counter} images from PDF")
+        
+        # Clean up PDF data and force garbage collection
+        del pdf_bytes
+        gc.collect()
+                            
+        logger.info(f"Extracted {global_fig_counter} images from PDF")
 
 
 class BasicPDFParser(AsyncParser[str | bytes]):
@@ -576,62 +728,6 @@ class PDFParserUnstructured(AsyncParser[str | bytes]):
         )
         for element in elements:
             yield element.text
-
-
-def extract_embedded_images_from_pdf_data(pdf_data: bytes) -> list[dict]:
-    """Extract embedded images from PDF data using pdfplumber."""
-    extracted_images = []
-    
-    try:
-        # Open PDF with pdfplumber
-        with pdfplumber.open(BytesIO(pdf_data)) as pdf:
-            for page_num, page in enumerate(pdf.pages, 1):
-                # Get images from the page
-                for img_obj in page.images:
-                    try:
-                        
-                        # Get image dimensions
-                        width = img_obj.get('width', 0)
-                        height = img_obj.get('height', 0)
-
-                        bbox = [img_obj.get('x0', 0), page.cropbox[3]-img_obj.get('y1', 0),  img_obj.get('x1', 0), page.cropbox[3]-img_obj.get('y0', 0)]
-                        img_page = page.crop(bbox=bbox)
-                        img = img_page.to_image(resolution=2048)
-                        with BytesIO() as output:
-                            img.original.save(output, format='PNG')
-                            image_data = output.getvalue()
-                            del img
-
-                        content_hash = hashlib.sha256(image_data).hexdigest()
-                        image_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, content_hash))
-                        
-                        
-                        # Create image metadata
-                        image_info = {
-                            'uuid': image_uuid,
-                            'content_hash': content_hash,
-                            'image_data': image_data,
-                            'mime_type': 'image/png',
-                            'width': width,
-                            'height': height,
-                            'page_number': page_num,
-                            'x0': img_obj.get('x0', 0),
-                            'y0': img_obj.get('y0', 0),
-                            'x1': img_obj.get('x1', 0),
-                            'y1': img_obj.get('y1', 0),
-                        }
-                        
-                        extracted_images.append(image_info)
-                        logger.info(f"Extracted image {image_uuid} from page {page_num}")
-                        
-                    except Exception as e:
-                        logger.warning(f"Failed to extract image from page {page_num}: {str(e)}")
-                        continue
-                        
-    except Exception as e:
-        logger.error(f"Error extracting images from PDF: {str(e)}")
-        
-    return extracted_images
 
 
 def add_figure_numbers_to_image(image_pil, figure_number: int, position_x: int = 10, position_y: int = 10) -> Image.Image:

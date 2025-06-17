@@ -80,7 +80,7 @@ class CompletionProvider(Provider):
                 raise
             except Exception as e:
                 logger.warning(
-                    f"Request failed (attempt {retries + 1}): {str(e)}"
+                    f"Request failed (attempt {retries + 1}): {str(e).split('\n')[0]}"
                 )
                 retries += 1
                 if retries == self.config.max_retries:

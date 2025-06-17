@@ -62,20 +62,23 @@ tools = ["search_file_knowledge"]
 
 [completion]
 provider = "litellm"
-concurrent_request_limit = 5
+concurrent_request_limit = 3
+max_retries = 3
+initial_backoff = 2.0
+max_backoff = 120.0
 
   [completion.generation_config]
   temperature = 0.1
   top_p = 1
-  max_tokens_to_sample = 1_024
-  stream = false
+  max_tokens_to_sample = 15000
   api_base = "http://host.docker.internal:11434"
 
 [ingestion]
 provider = "unstructured_local"
 strategy = "auto"
 new_after_n_chars = 512
-max_characters = 1_024
+max_characters = 4_096
+vlm_max_tokens_to_sample=15000
 combine_under_n_chars = 128
 overlap = 20
 chunks_for_document_summary = 16
