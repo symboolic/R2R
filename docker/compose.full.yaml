@@ -239,3 +239,30 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
+
+  gradio-ui:
+    build:
+      context: ../..
+      dockerfile: Dockerfile.gradio
+    ports:
+      - "7860:7860"
+    volumes:
+      - ../../assets:/app/assets
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PROD=true
+      - R2R_API_BASE=http://r2r:7272
+      - LITELLM_BASE_URL=http://litellm:4000
+    env_file:
+      - ../../.env
+    depends_on:
+      r2r:
+        condition: service_healthy
+      litellm:
+        condition: service_started
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7860"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
