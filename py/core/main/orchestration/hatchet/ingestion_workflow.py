@@ -41,7 +41,7 @@ def hatchet_ingestion_factory(
 ) -> dict[str, "Hatchet.Workflow"]:
     @orchestration_provider.workflow(
         name="ingest-files",
-        timeout="60m",
+        timeout="300m",
     )
     class HatchetIngestFilesWorkflow:
         def __init__(self, ingestion_service: IngestionService):
@@ -62,7 +62,7 @@ def hatchet_ingestion_factory(
             except Exception:
                 return str(uuid.uuid4())
 
-        @orchestration_provider.step(retries=0, timeout="60m")
+        @orchestration_provider.step(retries=0, timeout="300m")
         async def parse(self, context: Context) -> dict:
             try:
                 logger.info("Initiating ingestion workflow, step: parse")
@@ -342,13 +342,13 @@ def hatchet_ingestion_factory(
 
     @orchestration_provider.workflow(
         name="ingest-chunks",
-        timeout="60m",
+        timeout="120m",
     )
     class HatchetIngestChunksWorkflow:
         def __init__(self, ingestion_service: IngestionService):
             self.ingestion_service = ingestion_service
 
-        @orchestration_provider.step(timeout="60m")
+        @orchestration_provider.step(timeout="120m")
         async def ingest(self, context: Context) -> dict:
             input_data = context.workflow_input()["request"]
             parsed_data = IngestionServiceAdapter.parse_ingest_chunks_input(

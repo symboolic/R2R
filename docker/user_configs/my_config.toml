@@ -48,21 +48,21 @@ provider = "ollama"
 base_model = "nomic-embed-text"
 base_dimension = 768
 batch_size = 128
-concurrent_request_limit = 5
+concurrent_request_limit = 32
 
 [completion_embedding]
 provider = "ollama"
 base_model = "nomic-embed-text"
 base_dimension = 768
 batch_size = 128
-concurrent_request_limit = 5
+concurrent_request_limit = 8
 
 [agent]
 tools = ["search_file_knowledge"]
 
 [completion]
 provider = "litellm"
-concurrent_request_limit = 3
+concurrent_request_limit = 8
 max_retries = 3
 initial_backoff = 2.0
 max_backoff = 120.0
@@ -70,7 +70,7 @@ max_backoff = 120.0
   [completion.generation_config]
   temperature = 0.1
   top_p = 1
-  max_tokens_to_sample = 15000
+  max_tokens_to_sample = 5096
   api_base = "http://host.docker.internal:11434"
 
 [ingestion]
@@ -78,7 +78,9 @@ provider = "unstructured_local"
 strategy = "auto"
 new_after_n_chars = 512
 max_characters = 4_096
-vlm_max_tokens_to_sample=15000
+vlm_max_tokens_to_sample=5096
+vlm_batch_size=32
+max_concurrent_vlm_tasks=8
 combine_under_n_chars = 128
 overlap = 20
 chunks_for_document_summary = 16

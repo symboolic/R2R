@@ -90,12 +90,12 @@ class VLMPDFParser(AsyncParser[str | bytes]):
         self.llm_provider = llm_provider
         self.config = config
         self.vision_prompt_text = None
-        self.vlm_batch_size = self.config.vlm_batch_size or 3
+        self.vlm_batch_size = self.config.vlm_batch_size or 5
         self.vlm_max_tokens_to_sample = (
             self.config.vlm_max_tokens_to_sample or 1024
         )
         self.max_concurrent_vlm_tasks = (
-            self.config.max_concurrent_vlm_tasks or 3
+            self.config.max_concurrent_vlm_tasks or 5
         )
         self.semaphore = None
 
@@ -399,8 +399,6 @@ class VLMPDFParser(AsyncParser[str | bytes]):
                 )
             )
             logger.info("Retrieved vision prompt text from database.")
-
-        self.semaphore = asyncio.Semaphore(self.max_concurrent_vlm_tasks)
         
         # Get document_id from kwargs if available
         document_id = kwargs.get('document_id')
@@ -408,6 +406,8 @@ class VLMPDFParser(AsyncParser[str | bytes]):
         # Extract embedded images from PDF and store them
         pdf_data = data if isinstance(data, bytes) else open(data, 'rb').read()
         await self.extract_embedded_images_from_pdf_data(pdf_data, document_id)
+
+        self.semaphore = asyncio.Semaphore(self.max_concurrent_vlm_tasks)
 
         try:
             if isinstance(data, str):
@@ -604,34 +604,41 @@ class VLMPDFParser(AsyncParser[str | bytes]):
 
     async def extract_embedded_images_from_pdf_data(self, pdf_data: bytes, document_id: str) -> dict:
         """Extract embedded images from PDF data using pdfplumber."""
-
         global_fig_counter = 0
+        batch_size = 5  # adjust based on available RAM
+        semaphore = asyncio.Semaphore(batch_size)  # Control concurrent page processing
         
         # Open PDF with pdfplumber using memory-efficient approach
         pdf_bytes = BytesIO(pdf_data)
         with pdfplumber.open(pdf_bytes) as pdf:
             total_pages = len(pdf.pages)
             
-            # Process pages one by one to avoid keeping all pages in memory
-            for page_num in range(1, total_pages + 1):
-                # Get single page to avoid loading all pages at once
-                page = pdf.pages[page_num - 1]  # 0-indexed
-                
-                try:
-                    page_image_counter = await self.get_images_from_page(page, document_id, page_num)
-                    global_fig_counter += page_image_counter
-                finally:
-                    # Explicitly clean up page object
-                    if hasattr(page, 'flush_cache'):
-                        page.flush_cache()
-                    del page
-                    
-                    # Force garbage collection every few pages to prevent memory buildup
-                    if page_num % 5 == 0:  # Every 5 pages
-                        gc.collect()
-
-                    if page_num % 50 == 0 and page_num > 0:
-                        logger.info(f"Processed page {page_num} of {total_pages} - Extracted {global_fig_counter} images from PDF")
+            async def process_page(page_num: int):
+                nonlocal global_fig_counter
+                async with semaphore:  # Limit concurrent page processing
+                    try:
+                        # Get single page to avoid loading all pages at once
+                        page = pdf.pages[page_num - 1]  # 0-indexed
+                        page_image_counter = await self.get_images_from_page(page, document_id, page_num)
+                        global_fig_counter += page_image_counter
+                        
+                        # Explicitly clean up page object
+                        if hasattr(page, 'flush_cache'):
+                            page.flush_cache()
+                        del page
+                        gc.collect()  # Force garbage collection after processing each page
+                        
+                        if page_num % 50 == 0 and page_num > 0:
+                            logger.info(f"Processed page {page_num} of {total_pages} - Extracted {global_fig_counter} images from PDF")
+                            
+                    except Exception as e:
+                        logger.error(f"Error processing page {page_num}: {str(e)}")
+            
+            # Create tasks for all pages
+            tasks = [process_page(page_num) for page_num in range(1, total_pages + 1)]
+            
+            # Process pages in parallel with controlled concurrency
+            await asyncio.gather(*tasks)
         
         # Clean up PDF data and force garbage collection
         del pdf_bytes

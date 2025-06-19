@@ -220,7 +220,7 @@ services:
     image: ghcr.io/berriai/litellm:main-latest
     container_name: litellm
     ports:
-      - "4000:4000"
+      - "4001:4000"
     volumes:
       - ./litellm/litellm_proxy_config.yaml:/app/config.yaml
     env_file:
@@ -248,6 +248,7 @@ services:
       - "7860:7860"
     volumes:
       - ../../assets:/app/assets
+      - ../../r2r_gradio.py:/app/r2r_gradio.py
     environment:
       - PYTHONUNBUFFERED=1
       - PROD=true
