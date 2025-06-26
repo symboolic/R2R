@@ -251,6 +251,7 @@ services:
       - ../../r2r_gradio.py:/app/r2r_gradio.py
     environment:
       - PYTHONUNBUFFERED=1
+      - TELEMETRY_ENABLED=false
       - PROD=true
       - R2R_API_BASE=http://r2r:7272
       - LITELLM_BASE_URL=http://litellm:4000
